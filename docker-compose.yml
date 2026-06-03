@@ -1,0 +1,45 @@
+services:
+  terminology-postgres:
+    image: postgres:17-alpine
+    container_name: terminology-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: terminology_db
+      POSTGRES_USER: terminology_user
+      POSTGRES_PASSWORD: terminology_password
+      TZ: UTC
+    ports:
+      - "5434:5432"
+    volumes:
+      - terminology_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U terminology_user -d terminology_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  terminology-redis:
+    image: redis:8-alpine
+    container_name: terminology-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "1gb"
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - terminology_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  terminology_postgres_data:
+  terminology_redis_data:
