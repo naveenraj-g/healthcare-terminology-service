@@ -12,5 +12,7 @@ wheels/
 # Environment
 .env
 
-# Terminology data (large files — download separately)
-terminology_data/
+# Terminology data (large files — download separately, except README)
+terminology_data/*
+!terminology_data/README.md
+
