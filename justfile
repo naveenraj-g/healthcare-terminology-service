@@ -3,7 +3,7 @@
 install:
     uv sync
 
-run:
+dev:
     uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8005
 
 run-prod:
@@ -98,3 +98,54 @@ terminology-seed-bindings-r4:
 
 # Load all terminologies in order (each is idempotent — safe to re-run)
 terminology-all: terminology-fhir-r4 terminology-icd10cm terminology-rxnorm terminology-loinc terminology-snomed terminology-seed-bindings-r4
+
+# ── VPS / Production ──────────────────────────────────────────────────────────
+
+IMAGE := "ghcr.io/naveenraj-g/healthcare-terminology-service"
+TAG   := "latest"
+
+# Authenticate with ghcr.io (run once per machine — requires GITHUB_TOKEN env var)
+# export GITHUB_TOKEN=<your PAT with write:packages scope>
+vps-login:
+    echo $GITHUB_TOKEN | docker login ghcr.io -u naveenraj-g --password-stdin
+
+# Build the production image locally
+vps-build:
+    docker build -t {{IMAGE}}:{{TAG}} .
+
+# Push the locally-built image to ghcr.io
+vps-push:
+    docker push {{IMAGE}}:{{TAG}}
+
+# Build + push in one step (run this on your local machine before deploying)
+vps-release: vps-build vps-push
+
+# ── Run on the VPS ────────────────────────────────────────────────────────────
+
+# Pull latest image and start the stack (app + postgres + redis)
+# Migrations run automatically on app startup via entrypoint.sh
+vps-up:
+    docker compose -f vps-docker-compose.yml pull
+    docker compose -f vps-docker-compose.yml up -d
+
+# Restart the app container only (after a new image push)
+vps-redeploy:
+    docker compose -f vps-docker-compose.yml pull terminology-app
+    docker compose -f vps-docker-compose.yml up -d --no-deps terminology-app
+
+# Stop the VPS stack
+vps-down:
+    docker compose -f vps-docker-compose.yml down
+
+# Stream logs from all VPS services
+vps-logs:
+    docker compose -f vps-docker-compose.yml logs -f
+
+# Stream logs from the app only
+vps-logs-app:
+    docker compose -f vps-docker-compose.yml logs -f terminology-app
+
+# Seed all terminology data into the VPS database (one-shot, idempotent)
+# Requires: ./terminology_data/ populated with source files on the VPS host
+vps-seed:
+    docker compose -f vps-docker-compose.yml run --rm terminology-seeder

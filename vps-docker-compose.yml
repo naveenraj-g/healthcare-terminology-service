@@ -1,0 +1,104 @@
+services:
+
+  # ── Infrastructure ───────────────────────────────────────────────────────────
+
+  terminology-postgres:
+    image: postgres:17-alpine
+    container_name: terminology-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-terminology_db}
+      POSTGRES_USER: ${DB_USER:-terminology_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      TZ: UTC
+    volumes:
+      - terminology_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-terminology_user} -d ${DB_NAME:-terminology_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - terminology-net
+
+  terminology-redis:
+    image: redis:8-alpine
+    container_name: terminology-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "1gb"
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - terminology_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - terminology-net
+
+  # ── Application ──────────────────────────────────────────────────────────────
+
+  terminology-app:
+    image: ghcr.io/naveenraj-g/healthcare-terminology-service:latest
+    pull_policy: always
+    container_name: terminology-app
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      terminology-postgres:
+        condition: service_healthy
+      terminology-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - terminology-net
+
+  # ── One-time seeder ──────────────────────────────────────────────────────────
+  # Run once after the app is healthy to load all terminology data.
+  #
+  # Usage (on the VPS):
+  #   docker compose -f vps-docker-compose.yml run --rm terminology-seeder
+  #   -- or --
+  #   just vps-seed
+  #
+  # Requires terminology_data/ files present on the host at ./terminology_data/
+  # All imports are idempotent — safe to re-run.
+
+  terminology-seeder:
+    image: ghcr.io/naveenraj-g/healthcare-terminology-service:latest
+    pull_policy: always
+    container_name: terminology-seeder
+    env_file: .env
+    volumes:
+      - ./terminology_data:/terminology_data:ro
+    entrypoint: ["/bin/sh", "/app/seed-all.sh"]
+    depends_on:
+      terminology-app:
+        condition: service_healthy
+    restart: "no"
+    profiles:
+      - seed
+    networks:
+      - terminology-net
+
+volumes:
+  terminology_postgres_data:
+  terminology_redis_data:
+
+networks:
+  terminology-net:
+    driver: bridge
